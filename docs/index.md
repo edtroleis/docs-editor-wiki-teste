@@ -11,3 +11,5 @@ Bem-vindo! Esta wiki foi criada pelo portal e já pode ser editada sem conhecer 
 
 !!! tip "Dica"
     Enquanto o rascunho não é publicado, ninguém além de você vê as alterações.
+
+Frase nova escrita pelo teste do template.
