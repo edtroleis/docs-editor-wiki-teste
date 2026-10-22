@@ -1,0 +1,110 @@
+# Pipeline das docs. Os nomes dos jobs aparecem para o usuário no editor do portal
+# e são os checks obrigatórios do ruleset da main (ver setup-github.sh).
+name: techdocs
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # "Run workflow" no GitHub: republica a main sem precisar de um novo merge
+  workflow_dispatch:
+
+# Actions fixas pelo commit (a tag pode ser movida); a versão fica no comentário
+permissions:
+  contents: read
+
+jobs:
+  formatacao:
+    name: Formatação do texto
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: DavidAnson/markdownlint-cli2-action@05f32210e84442804257b2a6f20b273450ec8265 # v19.1.0
+        with:
+          globs: 'docs/**/*.md'
+
+  links:
+    name: Links
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --no-progress --root-dir ${{ github.workspace }}/docs 'docs/**/*.md'
+          fail: true
+
+  dados-sensiveis:
+    name: Dados sensíveis
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  montagem:
+    name: Montagem da documentação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # histórico completo: datas de criação e atualização das páginas
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: pip install mkdocs-techdocs-core==1.7.1 mkdocs-git-revision-date-localized-plugin==1.6.0
+      - run: mkdocs build --strict
+
+  publicar:
+    name: Publicar no TechDocs
+    if: github.event_name != 'pull_request'
+    needs: montagem
+    runs-on: ubuntu-latest
+    concurrency: techdocs-publish
+    env:
+      # Entidade derivada do repositório: <dono>/docs-editor-wiki-<nome> → wiki-<nome>
+      # Conta e chave de desenvolvimento padrão do Azurite (públicas, documentadas pela Microsoft)
+      AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - run: pip install mkdocs-techdocs-core==1.7.1 mkdocs-git-revision-date-localized-plugin==1.6.0
+
+      # O techdocs-cli remove plugins do MkDocs fora da lista dele; --defaultPlugin libera o das datas
+      - name: Gerar o site
+        run: >
+          npx -y @techdocs/cli@1.13.0 generate --no-docker --source-dir . --output-dir site
+          --defaultPlugin git-revision-date-localized
+
+      # Na demo, o "Azure" é um Azurite efêmero dentro do job: o passo de publicação é o real,
+      # só o destino é simulado. O site vai também como artefato para o sync local.
+      - name: Subir Azure Blob simulado (Azurite)
+        run: >
+          docker run -d --name azurite -p 10000:10000
+          mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
+          azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
+
+      - name: Publicar no Azure Blob
+        run: |
+          npm install --prefix /tmp/publisher --no-save --silent \
+            @backstage/plugin-techdocs-node@2.1.0 @backstage/config@1.3.10 @azure/storage-blob@12.34.0
+          ENTITY="default/component/${GITHUB_REPOSITORY#*/docs-editor-}"
+          NODE_PATH=/tmp/publisher/node_modules node .github/scripts/techdocs-azure-publish.cjs site "$ENTITY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: techdocs-site
+          path: site
+          retention-days: 7

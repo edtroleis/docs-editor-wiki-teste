@@ -1,0 +1,13 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: wiki-teste
+  title: Wiki de teste
+  description: Wiki criada pelo template Nova Wiki
+  annotations:
+    github.com/project-slug: edtroleis/docs-editor-wiki-teste
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: documentation
+  lifecycle: experimental
+  owner: group:default/guests
