@@ -34,6 +34,8 @@ jobs:
         with:
           args: --no-progress --root-dir ${{ github.workspace }}/docs 'docs/**/*.md'
           fail: true
+          # Wiki nova, sem nenhum link ainda: não é erro (o padrão da action reprova)
+          failIfEmpty: false
 
   dados-sensiveis:
     name: Dados sensíveis
